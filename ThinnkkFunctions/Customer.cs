@@ -2,6 +2,8 @@ using System;
 using System.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -108,6 +110,193 @@ public class Customer
         }
     }
 
+    [Function("CustomerEditProfile")]
+    public async Task<IActionResult> EditProfile(
+        [HttpTrigger(AuthorizationLevel.Function, "put", Route = "customer/profile/edit")] HttpRequest req)
+    {
+        _logger.LogInformation("Customer edit profile request received.");
+
+        if (!TryGetCustomerIdFromToken(req, out var customerId))
+        {
+            return new UnauthorizedObjectResult(new
+            {
+                success = false,
+                message = "Invalid or missing bearer token."
+            });
+        }
+
+        string? phoneNumber = null;
+        string? email = null;
+        string? fullName = null;
+
+        try
+        {
+            using var document = await JsonDocument.ParseAsync(req.Body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new BadRequestObjectResult(new
+                {
+                    success = false,
+                    message = "Request body must be a JSON object."
+                });
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.NameEquals("phoneNumber"))
+                {
+                    phoneNumber = ReadJsonStringValue(property.Value);
+                    continue;
+                }
+
+                if (property.NameEquals("email"))
+                {
+                    email = ReadJsonStringValue(property.Value);
+                    continue;
+                }
+
+                if (property.NameEquals("fullName"))
+                {
+                    fullName = ReadJsonStringValue(property.Value);
+                    continue;
+                }
+
+                return new BadRequestObjectResult(new
+                {
+                    success = false,
+                    message = "Only phoneNumber, email, and fullName are allowed for profile edit."
+                });
+            }
+        }
+        catch (JsonException)
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = "Invalid JSON payload."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(phoneNumber))
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = "phoneNumber is required."
+            });
+        }
+
+        try
+        {
+            phoneNumber = NormalizePhoneNumber(phoneNumber);
+        }
+        catch (InvalidOperationException)
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = "phoneNumber is invalid."
+            });
+        }
+
+        email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+        fullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName.Trim();
+
+        var connectionString = Environment.GetEnvironmentVariable("SQLCONNSTR_SqlConnectionString");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            _logger.LogError("SQLCONNSTR_SqlConnectionString environment variable is not configured.");
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Database connection is not configured."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+
+        try
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            await using var command = new SqlCommand("dbo.CustomerProfile_Update", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.Add(new SqlParameter("@CustomerId", SqlDbType.BigInt) { Value = customerId });
+            command.Parameters.Add(new SqlParameter("@PhoneNumber", SqlDbType.NVarChar, 255) { Value = (object?)phoneNumber ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 255) { Value = (object?)email ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@FullName", SqlDbType.NVarChar, 255) { Value = (object?)fullName ?? DBNull.Value });
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                _logger.LogError("dbo.CustomerProfile_Update did not return a result for CustomerId {CustomerId}.", customerId);
+                return new ObjectResult(new
+                {
+                    success = false,
+                    message = "Failed to update customer profile."
+                })
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError
+                };
+            }
+
+            var isSuccess = !reader.IsDBNull(reader.GetOrdinal("Success")) && Convert.ToBoolean(reader["Success"]);
+            var resultMessage = reader.IsDBNull(reader.GetOrdinal("Message"))
+                ? (isSuccess ? "Customer profile updated successfully." : "Failed to update customer profile.")
+                : reader.GetString(reader.GetOrdinal("Message"));
+
+            if (isSuccess)
+            {
+                return new OkObjectResult(new
+                {
+                    success = true,
+                    message = resultMessage
+                });
+            }
+
+            if (string.Equals(resultMessage, "Customer not found.", StringComparison.OrdinalIgnoreCase))
+            {
+                return new NotFoundObjectResult(new
+                {
+                    success = false,
+                    message = resultMessage
+                });
+            }
+
+            if (string.Equals(resultMessage, "Phone number is already registered.", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ConflictObjectResult(new
+                {
+                    success = false,
+                    message = resultMessage
+                });
+            }
+
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = resultMessage
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to edit customer profile for CustomerId {CustomerId}.", customerId);
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Failed to update customer profile."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+    }
+
     private static bool TryGetCustomerIdFromToken(HttpRequest req, out long customerId)
     {
         customerId = 0;
@@ -145,5 +334,42 @@ public class Customer
             string.Equals(c.Type, JwtRegisteredClaimNames.Sub, StringComparison.OrdinalIgnoreCase));
 
         return customerIdClaim is not null && long.TryParse(customerIdClaim.Value, out customerId);
+    }
+
+    private static string? ReadJsonStringValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            _ => value.ToString()
+        };
+    }
+
+    private static string NormalizePhoneNumber(string phoneNumber)
+    {
+        var trimmed = phoneNumber.Trim();
+        var normalizedBuilder = new StringBuilder(trimmed.Length);
+
+        for (var i = 0; i < trimmed.Length; i++)
+        {
+            var character = trimmed[i];
+            if (char.IsDigit(character))
+            {
+                normalizedBuilder.Append(character);
+            }
+        }
+
+        var normalized = normalizedBuilder.ToString();
+        if (normalized.StartsWith("00", StringComparison.Ordinal) && normalized.Length > 2)
+        {
+            normalized = normalized[2..];
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new InvalidOperationException("Phone number is required.");
+        }
+
+        return normalized;
     }
 }
