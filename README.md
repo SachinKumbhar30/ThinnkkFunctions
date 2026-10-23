@@ -1,0 +1,2 @@
+# ThinnkkFunctions
+Thinnkk Azure Functions
