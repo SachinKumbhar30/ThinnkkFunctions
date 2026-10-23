@@ -1,0 +1,89 @@
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Aa]rtifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# Visual Studio Code
+.vscode/
+
+# .NET MAUI build output
+**/bin/
+**/obj/
+**/Platforms/**/bin/
+**/Platforms/**/obj/
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+**/android/build/
+**/android/.gradle/
+**/Android/**/build/
+**/Android/**/.gradle/
+
+# iOS / Mac Catalyst build output
+*.ipa
+*.app/
+*.dSYM/
+**/ios/build/
+**/macos/build/
+
+# Windows build output
+**/win-x64/
+**/win-arm64/
+**/win10-x64/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test results and coverage
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.Local.json
+
+# Publish output
+publish/
+**/publish/
+
+# MAUI generated files
+**/MauiProgram.g.cs
+**/Resources/Fonts/*.ttf.tmp
