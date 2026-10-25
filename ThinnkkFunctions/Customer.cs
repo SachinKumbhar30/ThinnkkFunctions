@@ -297,9 +297,140 @@ public class Customer
         }
     }
 
+    [Function("CustomerCurrentApplication")]
+    public async Task<IActionResult> GetCurrentApplication(
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "customer/application/current")] HttpRequest req)
+    {
+        _logger.LogInformation("Customer current application request received.");
+
+        if (!TryGetCustomerAndApplicationIdFromToken(req, out var customerId, out var applicationId))
+        {
+            return new UnauthorizedObjectResult(new
+            {
+                success = false,
+                message = "Invalid or missing bearer token."
+            });
+        }
+
+        var connectionString = Environment.GetEnvironmentVariable("SQLCONNSTR_SqlConnectionString");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            _logger.LogError("SQLCONNSTR_SqlConnectionString environment variable is not configured.");
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Database connection is not configured."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+
+        try
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            await using var command = new SqlCommand("dbo.CustomerApplication_GetCurrentDetails", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            command.Parameters.Add(new SqlParameter("@CustomerId", SqlDbType.BigInt) { Value = customerId });
+            command.Parameters.Add(new SqlParameter("@ApplicationId", SqlDbType.Int) { Value = applicationId });
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return new NotFoundObjectResult(new
+                {
+                    success = false,
+                    message = "Customer application details not found."
+                });
+            }
+
+            var details = new
+            {
+                customerApplicationId = reader.GetInt64(reader.GetOrdinal("CustomerApplicationId")),
+                customerId = reader.GetInt64(reader.GetOrdinal("CustomerId")),
+                applicationId = reader.GetInt32(reader.GetOrdinal("ApplicationId")),
+                accessStatus = reader.GetString(reader.GetOrdinal("AccessStatus")),
+                accessType = reader.GetString(reader.GetOrdinal("AccessType")),
+                subscriptionReference = reader.IsDBNull(reader.GetOrdinal("SubscriptionReference"))
+                    ? null
+                    : reader.GetString(reader.GetOrdinal("SubscriptionReference")),
+                validFromUtc = reader.IsDBNull(reader.GetOrdinal("ValidFromUtc"))
+                    ? (DateTime?)null
+                    : reader.GetDateTime(reader.GetOrdinal("ValidFromUtc")),
+                validToUtc = reader.IsDBNull(reader.GetOrdinal("ValidToUtc"))
+                    ? (DateTime?)null
+                    : reader.GetDateTime(reader.GetOrdinal("ValidToUtc")),
+                grantedAtUtc = reader.GetDateTime(reader.GetOrdinal("GrantedAtUtc")),
+                createdAtUtc = reader.GetDateTime(reader.GetOrdinal("CreatedAtUtc"))
+            };
+
+            return new OkObjectResult(new
+            {
+                success = true,
+                message = "Customer application details fetched successfully.",
+                data = details
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch customer application details for CustomerId {CustomerId}, ApplicationId {ApplicationId}.", customerId, applicationId);
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Failed to fetch customer application details."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+    }
+
     private static bool TryGetCustomerIdFromToken(HttpRequest req, out long customerId)
     {
         customerId = 0;
+
+        if (!TryGetJwtToken(req, out var jwt))
+        {
+            return false;
+        }
+
+        var customerIdClaim = jwt.Claims.FirstOrDefault(c =>
+            string.Equals(c.Type, "customerId", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, JwtRegisteredClaimNames.Sub, StringComparison.OrdinalIgnoreCase));
+
+        return customerIdClaim is not null && long.TryParse(customerIdClaim.Value, out customerId);
+    }
+
+    private static bool TryGetCustomerAndApplicationIdFromToken(HttpRequest req, out long customerId, out int applicationId)
+    {
+        customerId = 0;
+        applicationId = 0;
+
+        if (!TryGetJwtToken(req, out var jwt))
+        {
+            return false;
+        }
+
+        var customerIdClaim = jwt.Claims.FirstOrDefault(c =>
+            string.Equals(c.Type, "customerId", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, JwtRegisteredClaimNames.Sub, StringComparison.OrdinalIgnoreCase));
+        var applicationIdClaim = jwt.Claims.FirstOrDefault(c =>
+            string.Equals(c.Type, "applicationId", StringComparison.OrdinalIgnoreCase));
+
+        return customerIdClaim is not null &&
+               long.TryParse(customerIdClaim.Value, out customerId) &&
+               applicationIdClaim is not null &&
+               int.TryParse(applicationIdClaim.Value, out applicationId) &&
+               applicationId > 0;
+    }
+
+    private static bool TryGetJwtToken(HttpRequest req, out JwtSecurityToken jwt)
+    {
+        jwt = null!;
 
         if (!req.Headers.TryGetValue("Authorization", out var authorizationHeader))
         {
@@ -319,21 +450,15 @@ public class Customer
             return false;
         }
 
-        JwtSecurityToken jwt;
         try
         {
             jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+            return true;
         }
         catch
         {
             return false;
         }
-
-        var customerIdClaim = jwt.Claims.FirstOrDefault(c =>
-            string.Equals(c.Type, "customerId", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(c.Type, JwtRegisteredClaimNames.Sub, StringComparison.OrdinalIgnoreCase));
-
-        return customerIdClaim is not null && long.TryParse(customerIdClaim.Value, out customerId);
     }
 
     private static string? ReadJsonStringValue(JsonElement value)
