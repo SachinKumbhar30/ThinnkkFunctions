@@ -263,6 +263,131 @@ public class Company
         }
     }
 
+    [Function("CompanyDelete")]
+    public async Task<IActionResult> Delete(
+        [HttpTrigger(AuthorizationLevel.Function, "delete", Route = "company/delete")] HttpRequest req)
+    {
+        _logger.LogInformation("Company delete request received.");
+
+        if (!TryGetCustomerAndApplicationIdFromToken(req, out var customerId, out var applicationId))
+        {
+            return new UnauthorizedObjectResult(new
+            {
+                success = false,
+                message = "Invalid or missing bearer token."
+            });
+        }
+
+        long companyId;
+        try
+        {
+            companyId = await ReadDeleteCompanyIdAsync(req);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (JsonException)
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = "Invalid JSON payload."
+            });
+        }
+
+        var connectionString = Environment.GetEnvironmentVariable("SQLCONNSTR_SqlConnectionString");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            _logger.LogError("SQLCONNSTR_SqlConnectionString environment variable is not configured.");
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Database connection is not configured."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+
+        try
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            await using var command = new SqlCommand("dbo.Company_Delete", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.BigInt) { Value = companyId });
+            command.Parameters.Add(new SqlParameter("@CustomerId", SqlDbType.BigInt) { Value = customerId });
+            command.Parameters.Add(new SqlParameter("@ApplicationId", SqlDbType.Int) { Value = applicationId });
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return new ObjectResult(new
+                {
+                    success = false,
+                    message = "Failed to delete company."
+                })
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError
+                };
+            }
+
+            var deletedCompany = new
+            {
+                companyId = reader.GetInt64(reader.GetOrdinal("CompanyId")),
+                customerId = reader.GetInt64(reader.GetOrdinal("CustomerId")),
+                applicationId = reader.GetInt32(reader.GetOrdinal("ApplicationId")),
+                companyName = reader.GetString(reader.GetOrdinal("CompanyName")),
+                isActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
+                updatedAtUtc = ReadNullableDateTime(reader, "UpdatedAtUtc")
+            };
+
+            return new OkObjectResult(new
+            {
+                success = true,
+                message = "Company deleted successfully.",
+                data = deletedCompany
+            });
+        }
+        catch (SqlException ex) when (ex.Number == 50001)
+        {
+            return new BadRequestObjectResult(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (SqlException ex) when (ex.Number == 50002)
+        {
+            return new NotFoundObjectResult(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete company {CompanyId} for CustomerId {CustomerId}, ApplicationId {ApplicationId}.", companyId, customerId, applicationId);
+            return new ObjectResult(new
+            {
+                success = false,
+                message = "Failed to delete company."
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+        }
+    }
+
     [Function("CompanyList")]
     public async Task<IActionResult> List(
         [HttpTrigger(AuthorizationLevel.Function, "get", Route = "company/list")] HttpRequest req)
@@ -354,6 +479,40 @@ public class Company
                 StatusCode = StatusCodes.Status500InternalServerError
             };
         }
+    }
+
+    private static async Task<long> ReadDeleteCompanyIdAsync(HttpRequest req)
+    {
+        using var document = await JsonDocument.ParseAsync(req.Body);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("Request body must be a JSON object.");
+        }
+
+        long? companyId = null;
+
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.NameEquals("companyId"))
+            {
+                if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt64(out var id))
+                {
+                    companyId = id;
+                    continue;
+                }
+
+                throw new InvalidOperationException("companyId must be a valid number.");
+            }
+
+            throw new InvalidOperationException("Only companyId is allowed in request body.");
+        }
+
+        if (!companyId.HasValue || companyId.Value <= 0)
+        {
+            throw new InvalidOperationException("companyId is required and must be greater than 0.");
+        }
+
+        return companyId.Value;
     }
 
     private static async Task<CompanyRequestModel> ReadCompanyRequestAsync(HttpRequest req, bool requireCompanyId)
