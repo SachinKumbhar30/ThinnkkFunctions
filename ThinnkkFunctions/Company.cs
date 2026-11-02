@@ -78,7 +78,7 @@ public class Company
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand("dbo.Company_Create", connection)
+            await using var command = new SqlCommand("dbo.Companies_Create", connection)
             {
                 CommandType = CommandType.StoredProcedure
             };
@@ -87,14 +87,16 @@ public class Company
             command.Parameters.Add(new SqlParameter("@ApplicationId", SqlDbType.Int) { Value = applicationId });
             command.Parameters.Add(new SqlParameter("@CompanyName", SqlDbType.NVarChar, 200) { Value = request.CompanyName! });
             command.Parameters.Add(new SqlParameter("@CompanyCode", SqlDbType.NVarChar, 50) { Value = (object?)request.CompanyCode ?? DBNull.Value });
-            command.Parameters.Add(new SqlParameter("@GSTIN", SqlDbType.NVarChar, 15) { Value = (object?)request.Gstin ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@TaxRegistrationNumber", SqlDbType.NVarChar, 50) { Value = (object?)(request.TaxRegistrationNumber ?? request.Gstin) ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@PAN", SqlDbType.NVarChar, 10) { Value = (object?)request.Pan ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@AddressLine1", SqlDbType.NVarChar, 200) { Value = (object?)request.AddressLine1 ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@AddressLine2", SqlDbType.NVarChar, 200) { Value = (object?)request.AddressLine2 ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@City", SqlDbType.NVarChar, 100) { Value = (object?)request.City ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@State", SqlDbType.NVarChar, 100) { Value = (object?)request.State ?? DBNull.Value });
-            command.Parameters.Add(new SqlParameter("@Country", SqlDbType.NVarChar, 100) { Value = (object?)request.Country ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@CountryId", SqlDbType.Int) { Value = (object?)request.CountryId ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@PinCode", SqlDbType.NVarChar, 10) { Value = (object?)request.PinCode ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@FinancialYearStart", SqlDbType.Date) { Value = (object?)request.FinancialYearStart ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@FinancialYearEnd", SqlDbType.Date) { Value = (object?)request.FinancialYearEnd ?? DBNull.Value });
 
             await using var reader = await command.ExecuteReaderAsync();
             if (!await reader.ReadAsync())
@@ -117,7 +119,7 @@ public class Company
                 data = company
             });
         }
-        catch (SqlException ex) when (ex.Number is 50001 or 50002)
+        catch (SqlException ex) when (ex.Number >= 50001 && ex.Number <= 50009)
         {
             return new BadRequestObjectResult(new
             {
@@ -195,7 +197,7 @@ public class Company
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand("dbo.Company_Update", connection)
+            await using var command = new SqlCommand("dbo.Companies_Update", connection)
             {
                 CommandType = CommandType.StoredProcedure
             };
@@ -205,14 +207,16 @@ public class Company
             command.Parameters.Add(new SqlParameter("@ApplicationId", SqlDbType.Int) { Value = applicationId });
             command.Parameters.Add(new SqlParameter("@CompanyName", SqlDbType.NVarChar, 200) { Value = request.CompanyName! });
             command.Parameters.Add(new SqlParameter("@CompanyCode", SqlDbType.NVarChar, 50) { Value = (object?)request.CompanyCode ?? DBNull.Value });
-            command.Parameters.Add(new SqlParameter("@GSTIN", SqlDbType.NVarChar, 15) { Value = (object?)request.Gstin ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@TaxRegistrationNumber", SqlDbType.NVarChar, 50) { Value = (object?)(request.TaxRegistrationNumber ?? request.Gstin) ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@PAN", SqlDbType.NVarChar, 10) { Value = (object?)request.Pan ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@AddressLine1", SqlDbType.NVarChar, 200) { Value = (object?)request.AddressLine1 ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@AddressLine2", SqlDbType.NVarChar, 200) { Value = (object?)request.AddressLine2 ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@City", SqlDbType.NVarChar, 100) { Value = (object?)request.City ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@State", SqlDbType.NVarChar, 100) { Value = (object?)request.State ?? DBNull.Value });
-            command.Parameters.Add(new SqlParameter("@Country", SqlDbType.NVarChar, 100) { Value = (object?)request.Country ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@CountryId", SqlDbType.Int) { Value = (object?)request.CountryId ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@PinCode", SqlDbType.NVarChar, 10) { Value = (object?)request.PinCode ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@FinancialYearStart", SqlDbType.Date) { Value = (object?)request.FinancialYearStart ?? DBNull.Value });
+            command.Parameters.Add(new SqlParameter("@FinancialYearEnd", SqlDbType.Date) { Value = (object?)request.FinancialYearEnd ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = request.IsActive ?? true });
 
             await using var reader = await command.ExecuteReaderAsync();
@@ -233,7 +237,7 @@ public class Company
                 data = company
             });
         }
-        catch (SqlException ex) when (ex.Number is 50003 or 50004)
+        catch (SqlException ex) when (ex.Number is 50010 or 50011 or 50012 or 50013 or 50015 or 50016)
         {
             return new BadRequestObjectResult(new
             {
@@ -241,7 +245,7 @@ public class Company
                 message = ex.Message
             });
         }
-        catch (SqlException ex) when (ex.Number == 50005)
+        catch (SqlException ex) when (ex.Number == 50014)
         {
             return new NotFoundObjectResult(new
             {
@@ -319,7 +323,7 @@ public class Company
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand("dbo.Company_Delete", connection)
+            await using var command = new SqlCommand("dbo.Companies_Delete", connection)
             {
                 CommandType = CommandType.StoredProcedure
             };
@@ -436,7 +440,7 @@ public class Company
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand("dbo.Company_List", connection)
+            await using var command = new SqlCommand("dbo.Companies_List", connection)
             {
                 CommandType = CommandType.StoredProcedure
             };
@@ -459,7 +463,7 @@ public class Company
                 data = companies
             });
         }
-        catch (SqlException ex) when (ex.Number == 50006)
+        catch (SqlException ex) when (ex.Number is 50017 or 50018)
         {
             return new BadRequestObjectResult(new
             {
@@ -556,6 +560,12 @@ public class Company
                 continue;
             }
 
+            if (property.NameEquals("taxRegistrationNumber"))
+            {
+                request.TaxRegistrationNumber = NormalizeNullableString(property.Value);
+                continue;
+            }
+
             if (property.NameEquals("gstin"))
             {
                 request.Gstin = NormalizeNullableString(property.Value);
@@ -598,9 +608,38 @@ public class Company
                 continue;
             }
 
+            if (property.NameEquals("countryId"))
+            {
+                if (property.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                {
+                    request.CountryId = null;
+                    continue;
+                }
+
+                if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt32(out var countryId))
+                {
+                    request.CountryId = countryId;
+                    continue;
+                }
+
+                throw new InvalidOperationException("countryId must be a valid number.");
+            }
+
             if (property.NameEquals("pinCode"))
             {
                 request.PinCode = NormalizeNullableString(property.Value);
+                continue;
+            }
+
+            if (property.NameEquals("financialYearStart"))
+            {
+                request.FinancialYearStart = NormalizeNullableDate(property.Value, "financialYearStart");
+                continue;
+            }
+
+            if (property.NameEquals("financialYearEnd"))
+            {
+                request.FinancialYearEnd = NormalizeNullableDate(property.Value, "financialYearEnd");
                 continue;
             }
 
@@ -640,6 +679,8 @@ public class Company
 
     private static object MapCompany(SqlDataReader reader)
     {
+        var taxRegistrationNumber = ReadNullableStringIfExists(reader, "TaxRegistrationNumber") ?? ReadNullableStringIfExists(reader, "GSTIN");
+
         return new
         {
             companyId = reader.GetInt64(reader.GetOrdinal("CompanyId")),
@@ -647,14 +688,21 @@ public class Company
             applicationId = reader.GetInt32(reader.GetOrdinal("ApplicationId")),
             companyName = reader.GetString(reader.GetOrdinal("CompanyName")),
             companyCode = ReadNullableString(reader, "CompanyCode"),
-            gstin = ReadNullableString(reader, "GSTIN"),
+            taxRegistrationNumber,
+            gstin = taxRegistrationNumber,
             pan = ReadNullableString(reader, "PAN"),
             addressLine1 = ReadNullableString(reader, "AddressLine1"),
             addressLine2 = ReadNullableString(reader, "AddressLine2"),
             city = ReadNullableString(reader, "City"),
             state = ReadNullableString(reader, "State"),
-            country = ReadNullableString(reader, "Country"),
+            countryId = ReadNullableInt32IfExists(reader, "CountryId"),
+            country = ReadNullableStringIfExists(reader, "CountryName") ?? ReadNullableStringIfExists(reader, "Country"),
+            countryCode = ReadNullableStringIfExists(reader, "CountryCode"),
+            countryCode3 = ReadNullableStringIfExists(reader, "CountryCode3"),
+            phoneCode = ReadNullableStringIfExists(reader, "PhoneCode"),
             pinCode = ReadNullableString(reader, "PinCode"),
+            financialYearStart = ReadNullableDateTimeIfExists(reader, "FinancialYearStart")?.Date,
+            financialYearEnd = ReadNullableDateTimeIfExists(reader, "FinancialYearEnd")?.Date,
             isActive = ReadNullableBoolean(reader, "IsActive") ?? true,
             createdAtUtc = ReadNullableDateTime(reader, "CreatedAtUtc"),
             updatedAtUtc = ReadNullableDateTime(reader, "UpdatedAtUtc")
@@ -665,6 +713,18 @@ public class Company
     {
         var ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static string? ReadNullableStringIfExists(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetColumnOrdinal(reader, columnName);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static int? ReadNullableInt32IfExists(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetColumnOrdinal(reader, columnName);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? (int?)null : reader.GetInt32(ordinal);
     }
 
     private static bool? ReadNullableBoolean(SqlDataReader reader, string columnName)
@@ -679,6 +739,25 @@ public class Company
         return reader.IsDBNull(ordinal) ? (DateTime?)null : reader.GetDateTime(ordinal);
     }
 
+    private static DateTime? ReadNullableDateTimeIfExists(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetColumnOrdinal(reader, columnName);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? (DateTime?)null : reader.GetDateTime(ordinal);
+    }
+
+    private static int GetColumnOrdinal(SqlDataReader reader, string columnName)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private static string? NormalizeNullableString(JsonElement value)
     {
         return value.ValueKind switch
@@ -686,6 +765,27 @@ public class Company
             JsonValueKind.Null or JsonValueKind.Undefined => null,
             _ => string.IsNullOrWhiteSpace(value.ToString()) ? null : value.ToString().Trim()
         };
+    }
+
+    private static DateTime? NormalizeNullableDate(JsonElement value, string fieldName)
+    {
+        if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        var rawValue = value.ToString();
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        if (DateTime.TryParse(rawValue, out var parsedDate))
+        {
+            return parsedDate.Date;
+        }
+
+        throw new InvalidOperationException($"{fieldName} must be a valid date.");
     }
 
     private static bool TryGetCustomerAndApplicationIdFromToken(HttpRequest req, out long customerId, out int applicationId)
@@ -752,6 +852,8 @@ public class Company
 
         public string? CompanyCode { get; set; }
 
+        public string? TaxRegistrationNumber { get; set; }
+
         public string? Gstin { get; set; }
 
         public string? Pan { get; set; }
@@ -766,7 +868,13 @@ public class Company
 
         public string? Country { get; set; }
 
+        public int? CountryId { get; set; }
+
         public string? PinCode { get; set; }
+
+        public DateTime? FinancialYearStart { get; set; }
+
+        public DateTime? FinancialYearEnd { get; set; }
 
         public bool? IsActive { get; set; }
     }
